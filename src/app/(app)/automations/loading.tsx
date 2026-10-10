@@ -1,0 +1,20 @@
+import { Bone, CardSkeleton, KpiSkeleton, PageHeaderSkeleton } from "@/components/shared/skeletons";
+
+export default function Loading() {
+  return (
+    <div className="mx-auto w-full max-w-[1400px] space-y-6 px-4 py-5 sm:px-6 sm:py-7">
+      <PageHeaderSkeleton />
+      <KpiSkeleton />
+      <div className="flex gap-2">
+        {Array.from({ length: 3 }).map((_, i) => (
+          <Bone key={i} className="h-8 w-28 rounded-full" />
+        ))}
+      </div>
+      <div className="grid gap-4 md:grid-cols-2 2xl:grid-cols-3">
+        {Array.from({ length: 6 }).map((_, i) => (
+          <CardSkeleton key={i} lines={5} />
+        ))}
+      </div>
+    </div>
+  );
+}

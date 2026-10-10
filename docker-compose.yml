@@ -1,0 +1,39 @@
+﻿name: commerceai
+
+services:
+  postgres:
+    image: postgres:17-alpine
+    container_name: commerceai-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: commerceai
+      POSTGRES_PASSWORD: commerceai
+      POSTGRES_DB: commerceai
+    ports:
+      - "5434:5432"
+    volumes:
+      - commerceai-pg:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U commerceai"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  redis:
+    image: redis:7-alpine
+    container_name: commerceai-redis
+    restart: unless-stopped
+    command: ["redis-server", "--appendonly", "yes", "--maxmemory-policy", "noeviction"]
+    ports:
+      - "6379:6379"
+    volumes:
+      - commerceai-redis:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+volumes:
+  commerceai-pg:
+  commerceai-redis:

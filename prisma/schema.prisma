@@ -1,0 +1,1548 @@
+// CommerceAI database schema
+//
+// Conventions
+// - Every tenant-owned row carries `storeId` and is indexed by it.
+// - Money is stored as integer minor units (e.g. paisa for PKR) to avoid
+//   floating point and Decimal serialization issues. Format with lib/money.
+// - `externalId` holds the id from the upstream system (Shopify, Meta, ...).
+// - Soft deletes (`deletedAt`) are used on user-facing records that may need recovery.
+
+generator client {
+  provider = "prisma-client"
+  output   = "../src/generated/prisma"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+// ───────────────────────────── Enums ─────────────────────────────
+
+enum Role {
+  OWNER
+  ADMIN
+  MANAGER
+  SUPPORT_AGENT
+  MARKETING_MANAGER
+  VIEWER
+}
+
+enum ActorType {
+  USER
+  AI
+  SYSTEM
+  CUSTOMER
+  WEBHOOK
+}
+
+enum IntegrationProvider {
+  SHOPIFY
+  WHATSAPP
+  FACEBOOK
+  INSTAGRAM
+  META_ADS
+  COURIER
+  OPENAI
+  ANTHROPIC
+  GEMINI
+}
+
+enum IntegrationStatus {
+  CONNECTED
+  DISCONNECTED
+  ERROR
+  DEMO
+}
+
+enum RiskLevel {
+  LOW
+  MEDIUM
+  HIGH
+}
+
+enum CustomerStatus {
+  ACTIVE
+  BLOCKED
+}
+
+enum ProductStatus {
+  ACTIVE
+  DRAFT
+  ARCHIVED
+}
+
+enum OrderStatus {
+  NEW
+  PENDING_CONFIRMATION
+  CONFIRMED
+  PROCESSING
+  SHIPPED
+  DELIVERED
+  CANCELLED
+  RETURNED
+}
+
+enum PaymentMethod {
+  COD
+  CARD
+  BANK_TRANSFER
+  WALLET
+}
+
+enum PaymentStatus {
+  PENDING
+  PAID
+  PARTIALLY_REFUNDED
+  REFUNDED
+  VOIDED
+}
+
+enum FulfillmentStatus {
+  UNFULFILLED
+  PARTIAL
+  FULFILLED
+}
+
+enum ConfirmationStatus {
+  NOT_REQUIRED
+  PENDING
+  CONFIRMED
+  DECLINED
+  NO_RESPONSE
+}
+
+enum Channel {
+  WHATSAPP
+  FACEBOOK
+  INSTAGRAM
+}
+
+enum ConversationStatus {
+  OPEN
+  PENDING
+  RESOLVED
+  CLOSED
+}
+
+enum ConversationHandler {
+  AI
+  HUMAN
+}
+
+// What the AI may do in one conversation: nothing, draft suggestions for a
+// human, or reply automatically (approved categories only).
+enum ConversationAiMode {
+  MANUAL
+  SUGGEST
+  AUTO
+}
+
+enum MessageDirection {
+  INBOUND
+  OUTBOUND
+}
+
+enum MessageSender {
+  CUSTOMER
+  AI
+  AGENT
+  SYSTEM
+}
+
+enum MessageStatus {
+  QUEUED
+  SENT
+  DELIVERED
+  READ
+  FAILED
+  RECEIVED
+}
+
+enum ShipmentStatus {
+  PENDING
+  BOOKED
+  PICKED_UP
+  IN_TRANSIT
+  OUT_FOR_DELIVERY
+  DELIVERED
+  FAILED_ATTEMPT
+  RETURNED
+  CANCELLED
+}
+
+enum CampaignStatus {
+  ACTIVE
+  PAUSED
+  ARCHIVED
+}
+
+enum InsightLevel {
+  CAMPAIGN
+  ADSET
+  AD
+}
+
+enum CreativeType {
+  IMAGE
+  VIDEO
+  CAROUSEL
+  COPY
+}
+
+enum AutomationStatus {
+  DRAFT
+  ACTIVE
+  PAUSED
+}
+
+enum AutomationNodeType {
+  TRIGGER
+  CONDITION
+  ACTION
+  WAIT
+  AI_DECISION
+  APPROVAL
+  NOTIFICATION
+}
+
+enum AutomationRunStatus {
+  RUNNING
+  WAITING
+  AWAITING_APPROVAL
+  COMPLETED
+  FAILED
+  CANCELLED
+}
+
+enum AgentKey {
+  ORDER
+  WHATSAPP
+  SUPPORT
+  MARKETING
+  ADS
+  INVENTORY
+  BUSINESS
+}
+
+enum AgentAutonomy {
+  SUGGEST_ONLY
+  APPROVAL_REQUIRED
+  AUTONOMOUS
+}
+
+enum AITaskStatus {
+  PENDING
+  RUNNING
+  SUCCEEDED
+  FAILED
+}
+
+enum DecisionStatus {
+  PENDING_APPROVAL
+  APPROVED
+  REJECTED
+  EXECUTED
+  AUTO_EXECUTED
+  FAILED
+  EXPIRED
+}
+
+enum InsightSeverity {
+  INFO
+  SUCCESS
+  WARNING
+  CRITICAL
+}
+
+enum TicketStatus {
+  OPEN
+  IN_PROGRESS
+  WAITING_ON_CUSTOMER
+  RESOLVED
+  CLOSED
+}
+
+enum TicketPriority {
+  LOW
+  MEDIUM
+  HIGH
+  URGENT
+}
+
+enum NotificationType {
+  ORDER
+  INVENTORY
+  CUSTOMER
+  WHATSAPP
+  ADS
+  AUTOMATION
+  AI
+  SYSTEM
+}
+
+enum Severity {
+  INFO
+  SUCCESS
+  WARNING
+  CRITICAL
+}
+
+enum WebhookStatus {
+  RECEIVED
+  QUEUED
+  PROCESSING
+  PROCESSED
+  FAILED
+  IGNORED
+}
+
+enum WebhookProvider {
+  SHOPIFY
+  WHATSAPP
+  META
+  COURIER
+}
+
+enum MarketingCampaignStatus {
+  DRAFT
+  PENDING_APPROVAL
+  SCHEDULED
+  SENDING
+  SENT
+  CANCELLED
+}
+
+enum PromotionType {
+  PERCENTAGE
+  FIXED_AMOUNT
+  FREE_SHIPPING
+}
+
+enum SocialPlatform {
+  FACEBOOK
+  INSTAGRAM
+}
+
+// ───────────────────────── Identity & tenancy ─────────────────────────
+
+model User {
+  id               String    @id @default(cuid())
+  email            String    @unique
+  name             String
+  passwordHash     String
+  avatarUrl        String?
+  twoFactorEnabled Boolean   @default(false)
+  twoFactorSecret  String? // encrypted TOTP secret
+  lastLoginAt      DateTime?
+  createdAt        DateTime  @default(now())
+  updatedAt        DateTime  @updatedAt
+  deletedAt        DateTime?
+
+  memberships         Membership[]
+  sessions            Session[]
+  notifications       Notification[]
+  assignedTickets     SupportTicket[]  @relation("TicketAssignee")
+  assignedChats       Conversation[]   @relation("ConversationAssignee")
+  reviewedDecisions   AIDecision[]     @relation("DecisionReviewer")
+  chatThreads         AIChatThread[]
+  createdAutomations  Automation[]
+}
+
+model Session {
+  id         String   @id @default(cuid())
+  tokenHash  String   @unique
+  userId     String
+  storeId    String?
+  ip         String?
+  userAgent  String?
+  expiresAt  DateTime
+  lastSeenAt DateTime @default(now())
+  createdAt  DateTime @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([expiresAt])
+}
+
+model Membership {
+  id        String   @id @default(cuid())
+  userId    String
+  storeId   String
+  role      Role
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  user  User  @relation(fields: [userId], references: [id], onDelete: Cascade)
+  store Store @relation(fields: [storeId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, storeId])
+  @@index([storeId])
+}
+
+model Store {
+  id                  String   @id @default(cuid())
+  name                String
+  slug                String   @unique
+  logoUrl             String?
+  currency            String   @default("PKR")
+  locale              String   @default("en-PK")
+  timezone            String   @default("Asia/Karachi")
+  demoMode            Boolean  @default(true)
+  onboardingCompleted Boolean  @default(false)
+  // Typed via src/schemas/store-settings.ts (AI, approvals, risk, schedules, notifications…)
+  settings            Json     @default("{}")
+  createdAt           DateTime @default(now())
+  updatedAt           DateTime @updatedAt
+
+  memberships        Membership[]
+  shopifyConnection  ShopifyConnection?
+  integrations       Integration[]
+  categories         ProductCategory[]
+  customers          Customer[]
+  segments           CustomerSegment[]
+  customerEvents     CustomerEvent[]
+  products           Product[]
+  variants           ProductVariant[]
+  inventorySnapshots InventorySnapshot[]
+  orders             Order[]
+  orderEvents        OrderEvent[]
+  conversations      Conversation[]
+  messages           Message[]
+  conversationTags   ConversationTag[]
+  messageTemplates   MessageTemplate[]
+  shipments          Shipment[]
+  metaAccounts       MetaAccount[]
+  campaigns          Campaign[]
+  adSets             AdSet[]
+  ads                Ad[]
+  adInsights         AdInsight[]
+  creativeAssets     CreativeAsset[]
+  leads              MetaLead[]
+  socialComments     SocialComment[]
+  automations        Automation[]
+  automationRuns     AutomationRun[]
+  agents             AIAgent[]
+  aiTasks            AITask[]
+  aiDecisions        AIDecision[]
+  aiInsights         AIInsight[]
+  knowledgeArticles  KnowledgeArticle[]
+  chatThreads        AIChatThread[]
+  tickets            SupportTicket[]
+  notifications      Notification[]
+  auditLogs          AuditLog[]
+  webhookEvents      WebhookEvent[]
+  domainEvents       DomainEvent[]
+  reports            Report[]
+  dailyMetrics       StoreDailyMetric[]
+  marketingCampaigns MarketingCampaign[]
+  promotions         Promotion[]
+  files              FileBlob[]
+}
+
+// ───────────────────────────── Integrations ─────────────────────────────
+
+model ShopifyConnection {
+  id                 String    @id @default(cuid())
+  storeId            String    @unique
+  shopDomain         String    @unique
+  accessTokenEnc     String // AES-256-GCM encrypted
+  scopes             String
+  apiVersion         String
+  webhooksRegistered Boolean   @default(false)
+  installedAt        DateTime  @default(now())
+  uninstalledAt      DateTime?
+  lastSyncAt         DateTime?
+  lastSyncError      String?
+  createdAt          DateTime  @default(now())
+  updatedAt          DateTime  @updatedAt
+
+  store Store @relation(fields: [storeId], references: [id], onDelete: Cascade)
+}
+
+model Integration {
+  id             String              @id @default(cuid())
+  storeId        String
+  provider       IntegrationProvider
+  status         IntegrationStatus   @default(DISCONNECTED)
+  // Encrypted JSON blob of secrets (tokens, API keys). Never sent to the client.
+  credentialsEnc String?
+  // Non-secret configuration (account ids, phone number id, model names...)
+  config         Json                @default("{}")
+  lastSyncAt     DateTime?
+  lastError      String?
+  connectedAt    DateTime?
+  createdAt      DateTime            @default(now())
+  updatedAt      DateTime            @updatedAt
+
+  store Store @relation(fields: [storeId], references: [id], onDelete: Cascade)
+
+  @@unique([storeId, provider])
+}
+
+model WebhookEvent {
+  id          String          @id @default(cuid())
+  storeId     String?
+  provider    WebhookProvider
+  topic       String
+  // Provider delivery id, used for idempotency (e.g. X-Shopify-Webhook-Id)
+  externalId  String
+  payload     Json
+  status      WebhookStatus   @default(RECEIVED)
+  attempts    Int             @default(0)
+  error       String?
+  receivedAt  DateTime        @default(now())
+  processedAt DateTime?
+
+  store Store? @relation(fields: [storeId], references: [id], onDelete: Cascade)
+
+  @@unique([provider, externalId])
+  @@index([storeId, receivedAt])
+  @@index([status])
+}
+
+// ───────────────────────────── Customers ─────────────────────────────
+
+model Customer {
+  id               String         @id @default(cuid())
+  storeId          String
+  externalId       String?
+  name             String
+  email            String?
+  phone            String?
+  city             String?
+  address          Json?
+  tags             String[]
+  acceptsMarketing Boolean        @default(true)
+  status           CustomerStatus @default(ACTIVE)
+  // Denormalized metrics, recomputed by customer.service#recomputeMetrics
+  totalOrders      Int            @default(0)
+  totalSpent       Int            @default(0)
+  avgOrderValue    Int            @default(0)
+  deliveredCount   Int            @default(0)
+  cancelledCount   Int            @default(0)
+  returnedCount    Int            @default(0)
+  firstOrderAt     DateTime?
+  lastOrderAt      DateTime?
+  riskScore        Int            @default(0)
+  riskLevel        RiskLevel      @default(LOW)
+  aiSummary        Json?
+  notes            String?
+  createdAt        DateTime       @default(now())
+  updatedAt        DateTime       @updatedAt
+  deletedAt        DateTime?
+
+  store         Store                   @relation(fields: [storeId], references: [id], onDelete: Cascade)
+  orders        Order[]
+  events        CustomerEvent[]
+  segments      CustomerSegmentMember[]
+  conversations Conversation[]
+  tickets       SupportTicket[]
+
+  @@unique([storeId, externalId])
+  @@index([storeId, phone])
+  @@index([storeId, email])
+  @@index([storeId, lastOrderAt])
+  @@index([storeId, totalSpent])
+}
+
+model CustomerSegment {
+  id            String   @id @default(cuid())
+  storeId       String
+  key           String // stable identifier, e.g. "vip", "inactive"
+  name          String
+  description   String?
+  color         String   @default("indigo")
+  isSystem      Boolean  @default(false)
+  // Rule definition evaluated by segment.service (see src/schemas/segment.ts)
+  rules         Json     @default("{}")
+  customerCount Int      @default(0)
+  computedAt    DateTime?
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  store              Store                   @relation(fields: [storeId], references: [id], onDelete: Cascade)
+  members            CustomerSegmentMember[]
+  marketingCampaigns MarketingCampaign[]
+
+  @@unique([storeId, key])
+}
+
+model CustomerSegmentMember {
+  segmentId  String
+  customerId String
+  addedAt    DateTime @default(now())
+
+  segment  CustomerSegment @relation(fields: [segmentId], references: [id], onDelete: Cascade)
+  customer Customer        @relation(fields: [customerId], references: [id], onDelete: Cascade)
+
+  @@id([segmentId, customerId])
+  @@index([customerId])
+}
+
+model CustomerEvent {
+  id         String   @id @default(cuid())
+  storeId    String
+  customerId String
+  type       String
+  title      String
+  data       Json?
+  createdAt  DateTime @default(now())
+
+  store    Store    @relation(fields: [storeId], references: [id], onDelete: Cascade)
+  customer Customer @relation(fields: [customerId], references: [id], onDelete: Cascade)
+
+  @@index([customerId, createdAt])
+}
+
+// ───────────────────────────── Catalog ─────────────────────────────
+
+model ProductCategory {
+  id        String   @id @default(cuid())
+  storeId   String
+  name      String
+  slug      String
+  position  Int      @default(0)
+  createdAt DateTime @default(now())
+
+  store    Store     @relation(fields: [storeId], references: [id], onDelete: Cascade)
+  products Product[]
+
+  @@unique([storeId, slug])
+}
+
+model Product {
+  id             String        @id @default(cuid())
+  storeId        String
+  externalId     String?
+  title          String
+  handle         String
+  description    String?
+  categoryId     String?
+  vendor         String?
+  imageUrl       String?
+  status         ProductStatus @default(ACTIVE)
+  tags           String[]
+  price          Int // lowest variant price, minor units
+  compareAtPrice Int?
+  costPrice      Int?
+  // Denormalized metrics
+  totalInventory Int           @default(0)
+  unitsSold      Int           @default(0)
+  revenue        Int           @default(0)
+  sessions       Int           @default(0)
+  returnRate     Float         @default(0)
+  createdAt      DateTime      @default(now())
+  updatedAt      DateTime      @updatedAt
+  deletedAt      DateTime?
+
+  store      Store            @relation(fields: [storeId], references: [id], onDelete: Cascade)
+  category   ProductCategory? @relation(fields: [categoryId], references: [id], onDelete: SetNull)
+  variants   ProductVariant[]
+  orderItems OrderItem[]
+
+  @@unique([storeId, externalId])
+  @@unique([storeId, handle])
+  @@index([storeId, categoryId])
+  @@index([storeId, status])
+}
+
+model ProductVariant {
+  id                String   @id @default(cuid())
+  storeId           String
+  productId         String
+  externalId        String?
+  inventoryItemId   String?
+  title             String
+  sku               String?
+  size              String?
+  color             String?
+  price             Int
+  compareAtPrice    Int?
+  costPrice         Int?
+  inventoryQuantity Int      @default(0)
+  lowStockThreshold Int      @default(10)
+  unitsSold         Int      @default(0)
+  position          Int      @default(0)
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+
+  store      Store               @relation(fields: [storeId], references: [id], onDelete: Cascade)
+  product    Product             @relation(fields: [productId], references: [id], onDelete: Cascade)
+  snapshots  InventorySnapshot[]
+  orderItems OrderItem[]
+
+  @@unique([storeId, externalId])
+  @@index([productId])
+  @@index([storeId, sku])
+  @@index([storeId, inventoryQuantity])
+}
+
+model InventorySnapshot {
+  id        String   @id @default(cuid())
+  storeId   String
+  variantId String
+  date      DateTime @db.Date
+  quantity  Int
+  sold      Int      @default(0)
+  createdAt DateTime @default(now())
+
+  store   Store          @relation(fields: [storeId], references: [id], onDelete: Cascade)
+  variant ProductVariant @relation(fields: [variantId], references: [id], onDelete: Cascade)
+
+  @@unique([variantId, date])
+  @@index([storeId, date])
+}
+
+// ───────────────────────────── Orders ─────────────────────────────
+
+model Order {
+  id                 String             @id @default(cuid())
+  storeId            String
+  externalId         String?
+  orderNumber        Int
+  name               String // display name, e.g. "#10452"
+  customerId         String?
+  customerName       String
+  email              String?
+  phone              String?
+  city               String?
+  shippingAddress    Json?
+  currency           String
+  subtotal           Int
+  shippingTotal      Int                @default(0)
+  discountTotal      Int                @default(0)
+  total              Int
+  paymentMethod      PaymentMethod
+  paymentStatus      PaymentStatus      @default(PENDING)
+  status             OrderStatus        @default(NEW)
+  fulfillmentStatus  FulfillmentStatus  @default(UNFULFILLED)
+  confirmationStatus ConfirmationStatus @default(NOT_REQUIRED)
+  riskScore          Int                @default(0)
+  riskLevel          RiskLevel          @default(LOW)
+  riskSignals        Json?
+  source             String?            @default("web")
+  tags               String[]
+  note               String?
+  cancelReason       String?
+  placedAt           DateTime
+  confirmedAt        DateTime?
+  shippedAt          DateTime?
+  deliveredAt        DateTime?
+  cancelledAt        DateTime?
+  returnedAt         DateTime?
+  createdAt          DateTime           @default(now())
+  updatedAt          DateTime           @updatedAt
+
+  store         Store           @relation(fields: [storeId], references: [id], onDelete: Cascade)
+  customer      Customer?       @relation(fields: [customerId], references: [id], onDelete: SetNull)
+  items         OrderItem[]
+  events        OrderEvent[]
+  shipments     Shipment[]
+  tickets       SupportTicket[]
+  conversations Conversation[]
+
+  @@unique([storeId, orderNumber])
+  @@unique([storeId, externalId])
+  @@index([storeId, placedAt])
+  @@index([storeId, status])
+  @@index([storeId, riskLevel])
+  @@index([storeId, confirmationStatus])
+  @@index([customerId])
+  @@index([storeId, phone])
+}
+
+model OrderItem {
+  id           String  @id @default(cuid())
+  orderId      String
+  productId    String?
+  variantId    String?
+  title        String
+  variantTitle String?
+  sku          String?
+  imageUrl     String?
+  quantity     Int
+  unitPrice    Int
+  unitCost     Int?
+  total        Int
+
+  order   Order           @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  product Product?        @relation(fields: [productId], references: [id], onDelete: SetNull)
+  variant ProductVariant? @relation(fields: [variantId], references: [id], onDelete: SetNull)
+
+  @@index([orderId])
+  @@index([productId])
+  @@index([variantId])
+}
+
+model OrderEvent {
+  id          String    @id @default(cuid())
+  storeId     String
+  orderId     String
+  type        String // e.g. "placed", "risk_analyzed", "confirmation_sent", "confirmed", "shipped"
+  title       String
+  description String?
+  actorType   ActorType @default(SYSTEM)
+  actorId     String?
+  actorName   String?
+  data        Json?
+  createdAt   DateTime  @default(now())
+
+  store Store @relation(fields: [storeId], references: [id], onDelete: Cascade)
+  order Order @relation(fields: [orderId], references: [id], onDelete: Cascade)
+
+  @@index([orderId, createdAt])
+}
+
+// ───────────────────────────── Shipping ─────────────────────────────
+
+model Shipment {
+  id                String         @id @default(cuid())
+  storeId           String
+  orderId           String
+  courier           String // provider key, e.g. "demo", "manual"
+  trackingNumber    String?
+  trackingUrl       String?
+  status            ShipmentStatus @default(PENDING)
+  codAmount         Int            @default(0)
+  estimatedDelivery DateTime?
+  lastSyncedAt      DateTime?
+  createdAt         DateTime       @default(now())
+  updatedAt         DateTime       @updatedAt
+
+  store  Store           @relation(fields: [storeId], references: [id], onDelete: Cascade)
+  order  Order           @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  events TrackingEvent[]
+
+  @@index([orderId])
+  @@index([storeId, status])
+  @@index([storeId, trackingNumber])
+}
+
+model TrackingEvent {
+  id          String         @id @default(cuid())
+  shipmentId  String
+  status      ShipmentStatus
+  description String
+  location    String?
+  occurredAt  DateTime
+
+  shipment Shipment @relation(fields: [shipmentId], references: [id], onDelete: Cascade)
+
+  @@index([shipmentId, occurredAt])
+}
+
+// ───────────────────────────── Conversations ─────────────────────────────
+
+model Conversation {
+  id                 String              @id @default(cuid())
+  storeId            String
+  channel            Channel
+  externalThreadId   String // phone number for WhatsApp, PSID/IGSID for Meta
+  customerId         String?
+  orderId            String? // order currently being discussed (e.g. confirmation)
+  contactName        String
+  contactHandle      String
+  status             ConversationStatus  @default(OPEN)
+  handler            ConversationHandler @default(AI)
+  aiMode             ConversationAiMode  @default(AUTO)
+  assignedToId       String?
+  unreadCount        Int                 @default(0)
+  lastMessageAt      DateTime            @default(now())
+  lastMessagePreview String?
+  // Who spoke last — separates "needs reply" from "waiting on customer"
+  lastMessageDirection MessageDirection?
+  needsAttention     Boolean             @default(false)
+  attentionReason    String?
+  aiConfidence       Float?
+  notes              String?
+  createdAt          DateTime            @default(now())
+  updatedAt          DateTime            @updatedAt
+
+  store      Store             @relation(fields: [storeId], references: [id], onDelete: Cascade)
+  customer   Customer?         @relation(fields: [customerId], references: [id], onDelete: SetNull)
+  order      Order?            @relation(fields: [orderId], references: [id], onDelete: SetNull)
+  assignedTo User?             @relation("ConversationAssignee", fields: [assignedToId], references: [id], onDelete: SetNull)
+  messages   Message[]
+  tags       ConversationTag[]
+  tickets    SupportTicket[]
+
+  @@unique([storeId, channel, externalThreadId])
+  @@index([storeId, lastMessageAt])
+  @@index([storeId, status])
+  @@index([customerId])
+}
+
+model Message {
+  id             String           @id @default(cuid())
+  storeId        String
+  conversationId String
+  direction      MessageDirection
+  sender         MessageSender
+  senderUserId   String?
+  body           String
+  mediaUrl       String?
+  mediaType      String?
+  templateName   String?
+  externalId     String?
+  status         MessageStatus    @default(QUEUED)
+  error          String?
+  // AI metadata: intent, confidence, tools used, etc.
+  aiMeta         Json?
+  createdAt      DateTime         @default(now())
+
+  store        Store        @relation(fields: [storeId], references: [id], onDelete: Cascade)
+  conversation Conversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+
+  @@unique([storeId, externalId])
+  @@index([conversationId, createdAt])
+}
+
+model ConversationTag {
+  id        String   @id @default(cuid())
+  storeId   String
+  name      String
+  color     String   @default("slate")
+  createdAt DateTime @default(now())
+
+  store         Store          @relation(fields: [storeId], references: [id], onDelete: Cascade)
+  conversations Conversation[]
+
+  @@unique([storeId, name])
+}
+
+model MessageTemplate {
+  id         String   @id @default(cuid())
+  storeId    String
+  name       String // provider template name, e.g. "order_confirmation"
+  language   String   @default("en")
+  category   String   @default("UTILITY") // UTILITY | MARKETING | AUTHENTICATION
+  body       String // with {{1}} style placeholders
+  variables  String[]
+  status     String   @default("APPROVED")
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  store Store @relation(fields: [storeId], references: [id], onDelete: Cascade)
+
+  @@unique([storeId, name, language])
+}
+
+// ───────────────────────────── Meta ─────────────────────────────
+
+model MetaAccount {
+  id              String    @id @default(cuid())
+  storeId         String
+  adAccountId     String
+  name            String
+  currency        String
+  pageId          String?
+  pageName        String?
+  instagramId     String?
+  instagramHandle String?
+  lastSyncAt      DateTime?
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+
+  store     Store      @relation(fields: [storeId], references: [id], onDelete: Cascade)
+  campaigns Campaign[]
+
+  @@unique([storeId, adAccountId])
+}
+
+model Campaign {
+  id             String         @id @default(cuid())
+  storeId        String
+  metaAccountId  String
+  externalId     String
+  name           String
+  objective      String
+  status         CampaignStatus @default(ACTIVE)
+  dailyBudget    Int?
+  lifetimeBudget Int?
+  startDate      DateTime?
+  endDate        DateTime?
+  createdAt      DateTime       @default(now())
+  updatedAt      DateTime       @updatedAt
+
+  store       Store       @relation(fields: [storeId], references: [id], onDelete: Cascade)
+  metaAccount MetaAccount @relation(fields: [metaAccountId], references: [id], onDelete: Cascade)
+  adSets      AdSet[]
+  ads         Ad[]
+
+  @@unique([storeId, externalId])
+  @@index([storeId, status])
+}
+
+model AdSet {
+  id               String         @id @default(cuid())
+  storeId          String
+  campaignId       String
+  externalId       String
+  name             String
+  status           CampaignStatus @default(ACTIVE)
+  dailyBudget      Int?
+  optimizationGoal String?
+  audienceName     String?
+  targeting        Json?
+  createdAt        DateTime       @default(now())
+  updatedAt        DateTime       @updatedAt
+
+  store    Store    @relation(fields: [storeId], references: [id], onDelete: Cascade)
+  campaign Campaign @relation(fields: [campaignId], references: [id], onDelete: Cascade)
+  ads      Ad[]
+
+  @@unique([storeId, externalId])
+  @@index([campaignId])
+}
+
+model Ad {
+  id           String         @id @default(cuid())
+  storeId      String
+  campaignId   String
+  adSetId      String
+  externalId   String
+  name         String
+  status       CampaignStatus @default(ACTIVE)
+  creativeType CreativeType   @default(IMAGE)
+  thumbnailUrl String?
+  headline     String?
+  primaryText  String?
+  callToAction String?
+  createdAt    DateTime       @default(now())
+  updatedAt    DateTime       @updatedAt
+
+  store    Store           @relation(fields: [storeId], references: [id], onDelete: Cascade)
+  campaign Campaign        @relation(fields: [campaignId], references: [id], onDelete: Cascade)
+  adSet    AdSet           @relation(fields: [adSetId], references: [id], onDelete: Cascade)
+  assets   CreativeAsset[]
+
+  @@unique([storeId, externalId])
+  @@index([adSetId])
+  @@index([campaignId])
+}
+
+// Daily performance per entity. `entityId` is the internal id of the
+// campaign / ad set / ad identified by `level` (nullable FKs break uniqueness).
+model AdInsight {
+  id          String       @id @default(cuid())
+  storeId     String
+  level       InsightLevel
+  entityId    String
+  campaignId  String
+  date        DateTime     @db.Date
+  spend       Int          @default(0)
+  impressions Int          @default(0)
+  reach       Int          @default(0)
+  clicks      Int          @default(0)
+  purchases   Int          @default(0)
+  revenue     Int          @default(0)
+  leads       Int          @default(0)
+  createdAt   DateTime     @default(now())
+
+  store Store @relation(fields: [storeId], references: [id], onDelete: Cascade)
+
+  @@unique([storeId, level, entityId, date])
+  @@index([storeId, level, date])
+  @@index([campaignId, date])
+}
+
+model CreativeAsset {
+  id        String       @id @default(cuid())
+  storeId   String
+  adId      String?
+  type      CreativeType
+  name      String
+  fileId    String?
+  url       String?
+  copy      String?
+  // Structured AI analysis (see src/schemas/creative.ts)
+  analysis  Json?
+  status    String       @default("PENDING") // PENDING | ANALYZED | FAILED
+  createdAt DateTime     @default(now())
+  updatedAt DateTime     @updatedAt
+
+  store Store     @relation(fields: [storeId], references: [id], onDelete: Cascade)
+  ad    Ad?       @relation(fields: [adId], references: [id], onDelete: SetNull)
+  file  FileBlob? @relation(fields: [fileId], references: [id], onDelete: SetNull)
+
+  @@index([storeId, createdAt])
+}
+
+model MetaLead {
+  id         String         @id @default(cuid())
+  storeId    String
+  externalId String
+  platform   SocialPlatform
+  formName   String
+  name       String
+  phone      String?
+  email      String?
+  city       String?
+  data       Json?
+  status     String         @default("NEW") // NEW | CONTACTED | CONVERTED | LOST
+  createdAt  DateTime       @default(now())
+
+  store Store @relation(fields: [storeId], references: [id], onDelete: Cascade)
+
+  @@unique([storeId, externalId])
+  @@index([storeId, createdAt])
+}
+
+model SocialComment {
+  id          String         @id @default(cuid())
+  storeId     String
+  externalId  String
+  platform    SocialPlatform
+  postId      String
+  postCaption String?
+  authorName  String
+  body        String
+  sentiment   String? // POSITIVE | NEUTRAL | NEGATIVE
+  intent      String? // PRICE_QUESTION | AVAILABILITY | COMPLAINT | PRAISE | OTHER
+  replied     Boolean        @default(false)
+  replyBody   String?
+  hidden      Boolean        @default(false)
+  createdAt   DateTime       @default(now())
+
+  store Store @relation(fields: [storeId], references: [id], onDelete: Cascade)
+
+  @@unique([storeId, externalId])
+  @@index([storeId, createdAt])
+}
+
+// ───────────────────────────── Marketing ─────────────────────────────
+
+model MarketingCampaign {
+  id             String                  @id @default(cuid())
+  storeId        String
+  name           String
+  channel        Channel                 @default(WHATSAPP)
+  segmentId      String?
+  status         MarketingCampaignStatus @default(DRAFT)
+  templateName   String?
+  message        String
+  audienceSize   Int                     @default(0)
+  sentCount      Int                     @default(0)
+  deliveredCount Int                     @default(0)
+  readCount      Int                     @default(0)
+  conversions    Int                     @default(0)
+  revenue        Int                     @default(0)
+  scheduledAt    DateTime?
+  sentAt         DateTime?
+  createdById    String?
+  createdAt      DateTime                @default(now())
+  updatedAt      DateTime                @updatedAt
+
+  store   Store            @relation(fields: [storeId], references: [id], onDelete: Cascade)
+  segment CustomerSegment? @relation(fields: [segmentId], references: [id], onDelete: SetNull)
+
+  @@index([storeId, createdAt])
+}
+
+model Promotion {
+  id          String        @id @default(cuid())
+  storeId     String
+  name        String
+  code        String
+  type        PromotionType
+  value       Int // percentage (whole number) or minor units
+  minSubtotal Int?
+  usageCount  Int           @default(0)
+  usageLimit  Int?
+  startsAt    DateTime
+  endsAt      DateTime?
+  active      Boolean       @default(true)
+  createdAt   DateTime      @default(now())
+  updatedAt   DateTime      @updatedAt
+
+  store Store @relation(fields: [storeId], references: [id], onDelete: Cascade)
+
+  @@unique([storeId, code])
+}
+
+// ───────────────────────────── Automations ─────────────────────────────
+
+model Automation {
+  id            String           @id @default(cuid())
+  storeId       String
+  name          String
+  description   String?
+  status        AutomationStatus @default(DRAFT)
+  // Event type that starts the workflow, e.g. ORDER_CREATED (see lib/events/types.ts)
+  triggerType   String
+  templateKey   String?
+  version       Int              @default(1)
+  runCount      Int              @default(0)
+  lastRunAt     DateTime?
+  createdById   String?
+  createdAt     DateTime         @default(now())
+  updatedAt     DateTime         @updatedAt
+  deletedAt     DateTime?
+
+  store     Store            @relation(fields: [storeId], references: [id], onDelete: Cascade)
+  createdBy User?            @relation(fields: [createdById], references: [id], onDelete: SetNull)
+  nodes     AutomationNode[]
+  edges     AutomationEdge[]
+  runs      AutomationRun[]
+
+  @@index([storeId, status, triggerType])
+}
+
+model AutomationNode {
+  id           String             @id @default(cuid())
+  automationId String
+  key          String // stable id within the graph (used by edges and runs)
+  type         AutomationNodeType
+  label        String
+  config       Json               @default("{}")
+  positionX    Float              @default(0)
+  positionY    Float              @default(0)
+
+  automation Automation @relation(fields: [automationId], references: [id], onDelete: Cascade)
+
+  @@unique([automationId, key])
+}
+
+model AutomationEdge {
+  id           String  @id @default(cuid())
+  automationId String
+  sourceKey    String
+  targetKey    String
+  // Branch handle: "next" | "true" | "false" | "approved" | "rejected" | custom AI output
+  handle       String  @default("next")
+
+  automation Automation @relation(fields: [automationId], references: [id], onDelete: Cascade)
+
+  @@unique([automationId, sourceKey, handle, targetKey])
+}
+
+model AutomationRun {
+  id             String              @id @default(cuid())
+  storeId        String
+  automationId   String
+  status         AutomationRunStatus @default(RUNNING)
+  triggerEvent   String
+  // Prevents the same event from starting the same automation twice
+  dedupeKey      String?
+  context        Json                @default("{}")
+  currentNodeKey String?
+  resumeAt       DateTime?
+  steps          Json                @default("[]")
+  error          String?
+  startedAt      DateTime            @default(now())
+  finishedAt     DateTime?
+  updatedAt      DateTime            @updatedAt
+
+  store      Store      @relation(fields: [storeId], references: [id], onDelete: Cascade)
+  automation Automation @relation(fields: [automationId], references: [id], onDelete: Cascade)
+
+  @@unique([automationId, dedupeKey])
+  @@index([status, resumeAt])
+  @@index([storeId, startedAt])
+}
+
+// ───────────────────────────── AI ─────────────────────────────
+
+model AIAgent {
+  id          String        @id @default(cuid())
+  storeId     String
+  key         AgentKey
+  name        String
+  description String
+  enabled     Boolean       @default(true)
+  autonomy    AgentAutonomy @default(APPROVAL_REQUIRED)
+  // Tool names from the AI tool registry this agent may call
+  tools       String[]
+  // Agent instructions, confidence threshold, etc. (see src/schemas/agent.ts)
+  config      Json          @default("{}")
+  lastActiveAt DateTime?
+  createdAt   DateTime      @default(now())
+  updatedAt   DateTime      @updatedAt
+
+  store     Store              @relation(fields: [storeId], references: [id], onDelete: Cascade)
+  tasks     AITask[]
+  decisions AIDecision[]
+  insights  AIInsight[]
+  knowledge KnowledgeArticle[]
+
+  @@unique([storeId, key])
+}
+
+model AITask {
+  id          String       @id @default(cuid())
+  storeId     String
+  agentId     String?
+  type        String // e.g. "whatsapp.reply", "order.risk", "report.daily", "tool.call"
+  title       String
+  status      AITaskStatus @default(PENDING)
+  input       Json?
+  output      Json?
+  error       String?
+  provider    String?
+  model       String?
+  durationMs  Int?
+  relatedType String?
+  relatedId   String?
+  createdAt   DateTime     @default(now())
+  completedAt DateTime?
+
+  store     Store        @relation(fields: [storeId], references: [id], onDelete: Cascade)
+  agent     AIAgent?     @relation(fields: [agentId], references: [id], onDelete: SetNull)
+  decisions AIDecision[]
+
+  @@index([storeId, createdAt])
+  @@index([agentId, createdAt])
+}
+
+// A proposed action by AI. Sensitive ones wait in the Approval Center.
+model AIDecision {
+  id              String         @id @default(cuid())
+  storeId         String
+  agentId         String?
+  taskId          String?
+  title           String
+  // What happened / why it matters / what data supports it
+  summary         String
+  reasoning       String
+  evidence        Json           @default("[]")
+  // Tool to execute once approved, with validated input
+  action          String
+  actionInput     Json           @default("{}")
+  expectedImpact  String?
+  riskLevel       RiskLevel      @default(LOW)
+  // Only set when it comes from a model or a measured rate — never a placeholder.
+  confidence      Float?
+  requiresApproval Boolean       @default(true)
+  status          DecisionStatus @default(PENDING_APPROVAL)
+  reviewedById    String?
+  reviewedAt      DateTime?
+  reviewNote      String?
+  executedAt      DateTime?
+  executionResult Json?
+  relatedType     String?
+  relatedId       String?
+  // When set, an automation run is waiting on this decision
+  automationRunId String?
+  expiresAt       DateTime?
+  createdAt       DateTime       @default(now())
+  updatedAt       DateTime       @updatedAt
+
+  store      Store    @relation(fields: [storeId], references: [id], onDelete: Cascade)
+  agent      AIAgent? @relation(fields: [agentId], references: [id], onDelete: SetNull)
+  task       AITask?  @relation(fields: [taskId], references: [id], onDelete: SetNull)
+  reviewedBy User?    @relation("DecisionReviewer", fields: [reviewedById], references: [id], onDelete: SetNull)
+
+  @@index([storeId, status, createdAt])
+  @@index([relatedType, relatedId])
+}
+
+// Informational AI output surfaced on dashboards (no action executed).
+model AIInsight {
+  id              String          @id @default(cuid())
+  storeId         String
+  agentId         String?
+  kind            String // TOP_PRODUCT | INVENTORY | OPPORTUNITY | ISSUE | CAMPAIGN | CUSTOMER
+  severity        InsightSeverity @default(INFO)
+  title           String
+  headline        String
+  whatHappened    String
+  whyItMatters    String
+  evidence        Json            @default("[]")
+  suggestedAction String?
+  actionLabel     String?
+  actionHref      String?
+  relatedType     String?
+  relatedId       String?
+  dismissedAt     DateTime?
+  generatedAt     DateTime        @default(now())
+
+  store Store    @relation(fields: [storeId], references: [id], onDelete: Cascade)
+  agent AIAgent? @relation(fields: [agentId], references: [id], onDelete: SetNull)
+
+  @@index([storeId, generatedAt])
+}
+
+model KnowledgeArticle {
+  id        String   @id @default(cuid())
+  storeId   String
+  agentId   String?
+  title     String
+  category  String // POLICY | FAQ | SHIPPING | SIZING | PRODUCT
+  content   String
+  active    Boolean  @default(true)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  store Store    @relation(fields: [storeId], references: [id], onDelete: Cascade)
+  agent AIAgent? @relation(fields: [agentId], references: [id], onDelete: SetNull)
+
+  @@index([storeId, category])
+}
+
+model AIChatThread {
+  id        String   @id @default(cuid())
+  storeId   String
+  userId    String
+  title     String
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  store    Store           @relation(fields: [storeId], references: [id], onDelete: Cascade)
+  user     User            @relation(fields: [userId], references: [id], onDelete: Cascade)
+  messages AIChatMessage[]
+
+  @@index([storeId, userId, updatedAt])
+}
+
+model AIChatMessage {
+  id        String   @id @default(cuid())
+  threadId  String
+  role      String // user | assistant
+  content   String
+  // Structured blocks rendered by the UI (tables, metrics, charts) + tools used
+  blocks    Json?
+  toolCalls Json?
+  createdAt DateTime @default(now())
+
+  thread AIChatThread @relation(fields: [threadId], references: [id], onDelete: Cascade)
+
+  @@index([threadId, createdAt])
+}
+
+// ───────────────────────────── Support & system ─────────────────────────────
+
+model SupportTicket {
+  id             String         @id @default(cuid())
+  storeId        String
+  number         Int
+  customerId     String?
+  conversationId String?
+  orderId        String?
+  subject        String
+  description    String?
+  category       String         @default("OTHER") // EXCHANGE | RETURN | DELIVERY | PRODUCT | PAYMENT | OTHER
+  status         TicketStatus   @default(OPEN)
+  priority       TicketPriority @default(MEDIUM)
+  assignedToId   String?
+  createdByType  ActorType      @default(SYSTEM)
+  resolvedAt     DateTime?
+  createdAt      DateTime       @default(now())
+  updatedAt      DateTime       @updatedAt
+
+  store        Store         @relation(fields: [storeId], references: [id], onDelete: Cascade)
+  customer     Customer?     @relation(fields: [customerId], references: [id], onDelete: SetNull)
+  conversation Conversation? @relation(fields: [conversationId], references: [id], onDelete: SetNull)
+  order        Order?        @relation(fields: [orderId], references: [id], onDelete: SetNull)
+  assignedTo   User?         @relation("TicketAssignee", fields: [assignedToId], references: [id], onDelete: SetNull)
+
+  @@unique([storeId, number])
+  @@index([storeId, status])
+}
+
+// One row per recipient so read/archive state is per user.
+model Notification {
+  id         String           @id @default(cuid())
+  storeId    String
+  userId     String
+  type       NotificationType
+  severity   Severity         @default(INFO)
+  title      String
+  body       String?
+  href       String?
+  readAt     DateTime?
+  archivedAt DateTime?
+  createdAt  DateTime         @default(now())
+
+  store Store @relation(fields: [storeId], references: [id], onDelete: Cascade)
+  user  User  @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, storeId, archivedAt, createdAt])
+}
+
+model AuditLog {
+  id            String    @id @default(cuid())
+  storeId       String
+  actorType     ActorType
+  actorId       String?
+  actorName     String
+  action        String // e.g. "order.confirm", "ai.tool.sendWhatsAppMessage"
+  resourceType  String
+  resourceId    String?
+  resourceLabel String?
+  oldValue      Json?
+  newValue      Json?
+  reason        String?
+  ip            String?
+  userAgent     String?
+  metadata      Json?
+  createdAt     DateTime  @default(now())
+
+  store Store @relation(fields: [storeId], references: [id], onDelete: Cascade)
+
+  @@index([storeId, createdAt])
+  @@index([storeId, resourceType, resourceId])
+  @@index([storeId, actorType])
+}
+
+// Append-only log of business events. Drives automations and the live activity feed.
+model DomainEvent {
+  id        String   @id @default(cuid())
+  storeId   String
+  type      String // see lib/events/types.ts
+  title     String
+  tone      String   @default("info") // success | info | warning | danger | ai
+  href      String?
+  payload   Json     @default("{}")
+  createdAt DateTime @default(now())
+
+  store Store @relation(fields: [storeId], references: [id], onDelete: Cascade)
+
+  @@index([storeId, createdAt])
+  @@index([storeId, type])
+}
+
+// Storefront traffic per day (Shopify analytics) — the denominator for conversion rate.
+model StoreDailyMetric {
+  id         String   @id @default(cuid())
+  storeId    String
+  date       DateTime @db.Date
+  sessions   Int      @default(0)
+  addToCarts Int      @default(0)
+  checkouts  Int      @default(0)
+  createdAt  DateTime @default(now())
+
+  store Store @relation(fields: [storeId], references: [id], onDelete: Cascade)
+
+  @@unique([storeId, date])
+}
+
+model Report {
+  id          String   @id @default(cuid())
+  storeId     String
+  type        String // DAILY | WEEKLY | MONTHLY
+  periodStart DateTime
+  periodEnd   DateTime
+  metrics     Json
+  insights    Json     @default("[]")
+  createdAt   DateTime @default(now())
+
+  store Store @relation(fields: [storeId], references: [id], onDelete: Cascade)
+
+  @@unique([storeId, type, periodStart])
+  @@index([storeId, createdAt])
+}
+
+// Small uploads (creatives, logos). Swap for object storage via lib/storage.
+model FileBlob {
+  id        String   @id @default(cuid())
+  storeId   String
+  filename  String
+  mimeType  String
+  size      Int
+  data      Bytes
+  createdAt DateTime @default(now())
+
+  store    Store           @relation(fields: [storeId], references: [id], onDelete: Cascade)
+  creative CreativeAsset[]
+}

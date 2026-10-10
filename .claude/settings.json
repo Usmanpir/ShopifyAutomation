@@ -1,0 +1,42 @@
+{
+  "permissions": {
+    "allow": [
+      "PowerShell(node --version)",
+      "PowerShell(npm --version)",
+      "PowerShell(pnpm --version)",
+      "PowerShell(docker --version)",
+      "PowerShell(psql --version)",
+      "PowerShell(docker info --format '{{.ServerVersion}}' 2>$null)",
+      "PowerShell(Test-NetConnection -ComputerName localhost -Port 6379 -InformationLevel Quiet)",
+      "PowerShell(Test-NetConnection -ComputerName localhost -Port 5433 -InformationLevel Quiet)",
+      "PowerShell(foreach \\($p in 'next','react','prisma','@prisma/client','tailwindcss','bullmq','ioredis','zod','@tanstack/react-query','recharts','@xyflow/react','vitest','shadcn','eslint','typescript','bcryptjs','react-hook-form','lucide-react','sonner','next-themes','cmdk','date-fns'\\) { \"$p \" + \\(npm view $p version\\) })",
+      "PowerShell(npm view prisma dist-tags --json)",
+      "PowerShell(npm view typescript dist-tags --json)",
+      "PowerShell(npm view next@16.3.8 peerDependencies --json)",
+      "PowerShell($s = \"C:\\\\Users\\\\USER\\\\AppData\\\\Local\\\\Temp\\\\claude\\\\c--Users-USER-Downloads-Personal-Projects-ShopifyAutomateAI\\\\52d534ef-d61a-492e-a515-6a5a871b0601\\\\scratchpad\\\\commerceai\"; Remove-Item -Recurse -Force \"$s\\\\.git\"; Get-ChildItem -Force $s | ForEach-Object { Move-Item $_.FullName \"c:\\\\Users\\\\USER\\\\Downloads\\\\Personal Projects\\\\ShopifyAutomateAI\\\\\" }; Get-ChildItem -Force; Get-Content package.json)",
+      "PowerShell(npm install @prisma/client@7.10.0 @prisma/adapter-pg@7.10.0 pg bullmq ioredis zod react-hook-form @hookform/resolvers @tanstack/react-query recharts @xyflow/react lucide-react sonner next-themes cmdk date-fns bcryptjs openai @anthropic-ai/sdk @google/genai pdf-lib server-only 2>&1)",
+      "PowerShell(npm install -D prisma@7.10.0 tsx vitest @types/pg dotenv 2>&1)",
+      "PowerShell(npm install -D prisma@7.10.0 tsx vitest @types/pg dotenv @types/node@^22 @types/bcryptjs 2>&1)",
+      "PowerShell(npx --yes shadcn@latest init --help 2>&1)",
+      "PowerShell(npx --yes shadcn@latest init -t next -b radix -y --no-monorepo --pointer 2>&1)",
+      "PowerShell(npx --yes shadcn@latest init -t next -b radix -p nova -y --no-monorepo --pointer 2>&1)",
+      "PowerShell(npx --yes shadcn@latest add -y -o card badge input label textarea select dialog sheet dropdown-menu tabs table avatar separator skeleton switch tooltip popover command scroll-area progress checkbox radio-group sonner toggle-group alert-dialog collapsible slider calendar form breadcrumb pagination hover-card accordion alert 2>&1)",
+      "PowerShell(docker compose up -d 2>&1)",
+      "PowerShell(npx prisma init --datasource-provider postgresql --output ../src/generated/prisma 2>&1)",
+      "PowerShell(Remove-Item -Recurse -Force .agents, .windsurf, skills-lock.json -Confirm:$false; Move-Item prisma7.config.ts prisma.config.ts; \\(Get-Content docker-compose.yml\\) -replace '\"5433:5432\"','\"5434:5432\"' | Set-Content -Encoding utf8 docker-compose.yml; docker compose up -d 2>&1 | Select-Object -Last 3)",
+      "Bash(cd \"/c/Users/USER/Downloads/Personal Projects/ShopifyAutomateAI\")",
+      "Bash(node -e \"console.log\\(require\\('crypto'\\).randomBytes\\(24\\).toString\\('hex'\\)\\)\")",
+      "Bash(sed -i 's/^CRON_SECRET=.*/CRON_SECRET=\"__TRACKED_VAR__\"/' .env)",
+      "Bash(sed -i '1s/^\\\\xEF\\\\xBB\\\\xBF//' .env)",
+      "Bash(grep -c . .env)",
+      "PowerShell(npx prisma migrate dev --name init 2>&1)",
+      "PowerShell(npx prisma generate 2>&1)",
+      "PowerShell(foreach \\($f in 'src\\\\lib\\\\env.ts','src\\\\lib\\\\db.ts'\\) { $c = Get-Content $f -Raw; $c = $c -replace 'import \"server-only\";\\\\r?\\\\n',''; [IO.File]::WriteAllText\\(\\(Resolve-Path $f\\), $c\\) }; Get-Content src\\\\lib\\\\db.ts -TotalCount 3)",
+      "Skill(claude-api)",
+      "Skill(claude-api:*)",
+      "PowerShell(npx tsc --noEmit -p . 2>&1)",
+      "PowerShell(npx prisma migrate dev --name store_daily_metrics 2>&1)",
+      "PowerShell($f='src\\\\services\\\\analytics.service.ts'; $c=[IO.File]::ReadAllText\\(\\(Resolve-Path $f\\)\\); $c=$c.Replace\\('AND date BETWEEN ${from}::date AND ${to}::date','AND date BETWEEN ${dayKey\\(from, timeZone\\)}::date AND ${dayKey\\(to, timeZone\\)}::date'\\); $c=$c.Replace\\('import { eachDayKey, resolveRange','import { dayKey, eachDayKey, resolveRange'\\); [IO.File]::WriteAllText\\(\\(Resolve-Path $f\\),$c\\); \\(Select-String -Path $f -Pattern 'dayKey\\\\\\(from'\\).Count)"
+    ]
+  }
+}
